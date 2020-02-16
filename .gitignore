@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+/WDNbuild/BWFL.py
+/WDNbuild/BWFLbasedata_classes.py
+/WDNbuild/BWFLbasedata_rewrite.py
+/WDNbuild/loadBWFL.py
+/WDNbuild/loaddata.py
+/WDNbuild/modelval.py
