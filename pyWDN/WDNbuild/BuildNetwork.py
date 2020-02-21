@@ -1,7 +1,7 @@
-import numpy as np
+from pyWDN.WDNbuild.MakeSparseMatrices import *
 
 class BuildWDN:
-    def __init__(self, pipes,junctions,reservoirs,headloss_formula):
+    def __init__(self, pipes, junctions, reservoirs, headloss_formula):
         # pipes
         self.pipes = pipes
         self.np = len(self.pipes)
@@ -28,22 +28,28 @@ class BuildWDN:
         elif headloss_formula == 'D-W':
             self.headloss['n_exp'] = 2
 
-        #todo: Add function to make A10 and A12 from above dictionaries
+        # A12 & A10
+        self.A12, self.A10 = make_incidence_matrices(self)
+
+        self.closed_pipes=[]
+
+        # Null Space
+        self.nulldata, self.auxdata = make_null_space(self.A12, self.nn, self.np, self.closed_pipes)
 
 
 class BuildWDN_fromMATLABfile(BuildWDN):
-    def __init__(self,filename):
+    def __init__(self, filename):
         # import .mat file
         import scipy.io as sc
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            tmf=sc.loadmat(filename)
-        self.tmf=tmf
+            tmf = sc.loadmat(filename)
+        self.tmf = tmf
 
         # define pipes
-        p=tmf['pipes'][0]
-        pipes=[
+        p = tmf['pipes'][0]
+        pipes = [
             {
                 list(p[j][0].dtype.fields.keys())[i]: p[j][0][0][i][0] if isinstance(p[j][0][0][i][0], str) else
                 p[j][0][0][i][0][0] for i in range(len(list(p[j][0].dtype.fields.keys())))
@@ -74,15 +80,15 @@ class BuildWDN_fromMATLABfile(BuildWDN):
         # headloss fucntions
         n_exp = tmf['n_exp']
         if np.all(n_exp == 1.852):
-            headloss_formula='H-W'
+            headloss_formula = 'H-W'
         elif np.all(n_exp == 2):
-            headloss_formula='D-W'
+            headloss_formula = 'D-W'
         else:
             warnings.warn('don\'t know what headloss formula to use, so using H-W')
-            headloss_formula='H-W'
+            headloss_formula = 'H-W'
 
         # Build WDN
-        super().__init__(pipes,junctions,reservoirs,headloss_formula)
+        super().__init__(pipes, junctions, reservoirs, headloss_formula)
 
         # add xy coordinates to junctions and reservoirs dicts
         for j in range(self.nn):
@@ -114,20 +120,16 @@ class BuildWDN_fromMATLABfile(BuildWDN):
 
         # define valves
         if tmf['valves'].size == 0:
-            self.valves=[]
+            self.valves = []
         else:
-            p=tmf['valves'][0]
-            self.valves=[
+            p = tmf['valves'][0]
+            self.valves = [
                 {
                     list(p[j][0].dtype.fields.keys())[i]: p[j][0][0][i][0] if isinstance(p[j][0][0][i][0], str) else
                     p[j][0][0][i][0][0] for i in range(len(list(p[j][0].dtype.fields.keys())))
                 }
                 for j in range(len(p))
             ]
-
-        # A10 and A12
-        self.A10 = tmf['A10']
-        self.A12 = tmf['A12']
 
         # baseDemands
         self.baseDemands = tmf['baseDemands']
@@ -137,15 +139,3 @@ class BuildWDN_fromMATLABfile(BuildWDN):
 
         # demands
         self.demands = tmf['demands']
-
-
-
-
-import os
-filename=os.path.join(os.path.dirname(os.getcwd()), 'NetworkFiles\\25nodesData.mat')
-temp=BuildWDN_fromMATLABfile(filename)
-
-# import matplotlib.pyplot as plt
-# fig, ax = plt.subplots(1,1)
-# ax.spy(temp.tmf['A12'])
-# fig.show()
