@@ -51,21 +51,27 @@ def make_incidence_matrices(self):
 
 def make_null_space(A12,nn,npp,closed_pipes):
     if closed_pipes != []:
-        A12[closed_pipes,:] = [];
+        A12[closed_pipes,:] = []
         npp = npp - len(closed_pipes)
-
     nc=npp-nn
-    (P, L, U) = la.lu(A12.toarray())
-    P = sp.csc_matrix(P)
-    L = sp.csc_matrix(L)
-    U = sp.csc_matrix(U)
 
-    L1 = L[:nn, :]
-    L2 = L[nn:, :]
-    K = -spla.spsolve(L1.T,L2.T)
-    Z = P.T@sp.vstack([K,sp.eye(nc)])
+    # # lu method
+    # (P, L, U) = la.lu(A12.toarray())
+    # # P = sp.csc_matrix(P)
+    # L = sp.csr_matrix(L)
+    # # U = sp.csc_matrix(U)
+    # L1 = L[:nn, :]
+    # L2 = L[nn:, :]
+    # K = -spla.spsolve(L1.T,L2.T)
+    # Z = P.T@sp.vstack([K,sp.eye(nc)])
 
-    factor=cholesky(A12.T@A12)
+    # Elhay null bases
+    Pt, _, T = permute_cotree(A12)
+    L21 = -spla.spsolve(T[:nn,:nn].T,T[nn:npp,:nn].T).T
+    Z = Pt.T@sp.hstack([L21,sp.eye(nc)]).T
+
+    # cholseky
+    factor=cholesky((A12.T@A12).tocsc())
     P_L=sp.eye(nn)
     Pr=sp.csc_matrix(P_L.toarray()[factor.P(), :])
     L_A12 = factor.L()
@@ -77,6 +83,44 @@ def make_null_space(A12,nn,npp,closed_pipes):
         'Z'     :   Z
     }
     auxdata={
-        'closed_links'  :   closed_pipes
+        'closed_pipes'  :   closed_pipes,
+        'max_iter'      :   50,
+        'kappa'         :   1e7,
+        'tol_err'       :   1e-6
     }
     return nulldata, auxdata
+
+def permute_cotree(A):
+    """based on the work of Edo Abraham (2014), Imperial College London"""
+
+    n, m = A.shape
+    Pt = sp.eye(n)
+    Rt = sp.eye(m)
+
+    for i in range(m):
+        K=A[i:,i:]
+        try:
+            r=np.where(np.sum(abs(K), 1) == 1)[0][0]
+        except:
+            r=np.array([],dtype=int)
+        c=np.where((abs(K[r,:]) == 1).toarray())[1]
+
+        if r!=0: # don't do operations unless row permutations are needed
+            P = sp.eye(n).tolil()
+            P[i, i] = 0
+            P[i + r, i + r] = 0
+            P[i, i + r] = 1
+            P[i + r, i] = 1
+            Pt = P @ Pt
+            A = P @ A
+
+        if c!=0: # don't do operations unless column permutations are needed
+            R = sp.eye(m).tolil()
+            R[i, i] = 0
+            R[i + c, i + c] = 0
+            R[i, i + c] = 1
+            R[i + c, i] = 1
+            Rt = R @ Rt
+            A = A @ R
+
+    return Pt.tocsr(), Rt.tocsr(), A

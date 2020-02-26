@@ -1,4 +1,6 @@
 from pyWDN.WDNbuild.MakeSparseMatrices import *
+from pyWDN.Solvers.hydraulics import evaluate_hydraulic
+
 
 class BuildWDN:
     def __init__(self, pipes, junctions, reservoirs, headloss_formula):
@@ -31,10 +33,16 @@ class BuildWDN:
         # A12 & A10
         self.A12, self.A10 = make_incidence_matrices(self)
 
-        self.closed_pipes=[]
-
         # Null Space
+        self.closed_pipes = []
         self.nulldata, self.auxdata = make_null_space(self.A12, self.nn, self.np, self.closed_pipes)
+        self.auxdata['max_iter'] = 50
+        self.auxdata['kappa'] = 1e7
+        self.auxdata['tol_err'] = 1e-6
+
+    def evaluate_hydraulics(self):
+
+        H_sim, Q_sim = evaluate_hydraulic(self)
 
 
 class BuildWDN_fromMATLABfile(BuildWDN):
@@ -131,11 +139,17 @@ class BuildWDN_fromMATLABfile(BuildWDN):
                 for j in range(len(p))
             ]
 
-        # baseDemands
-        self.baseDemands = tmf['baseDemands']
+        # nl
+        self.nl = tmf['nl'][0][0]
 
-        # baseH0
-        self.baseH0 = tmf['baseH0']
+        #PRVs/BVs/indexvalves
+        self.PRVs = list(tmf['PRVs'])
+        self.BVs = list(tmf['BVs'])
+        self.IndexValves = self.PRVs + self.BVs
 
-        # demands
-        self.demands = tmf['demands']
+        # add all remaining variables in tmf as attributes to the WDN class
+        for i in range(tmf.keys().__len__()):
+            if list(tmf.keys())[i] not in self.__dir__() and list(tmf.keys())[i] != 'n_exp':
+                attr_name = list(tmf.keys())[i]
+                self.__setattr__(attr_name, tmf[attr_name])
+
