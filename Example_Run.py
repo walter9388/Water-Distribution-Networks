@@ -3,17 +3,12 @@ import matplotlib.pyplot as plt
 import pyWDN
 
 filename = os.path.join(os.getcwd(), 'pyWDN\\NetworkFiles\\25nodesData.mat')
+filename = os.path.join(os.getcwd(), 'pyWDN\\NetworkFiles\\BURWELMA_2019-12-25_-_2019-12-27.mat')
 temp = pyWDN.WDNbuild.BuildWDN_fromMATLABfile(filename)
 
-
-fig, ax = plt.subplots(1,1)
-ax.spy(temp.tmf['A12'])
+temp.make_network_graph()
+fig, ax = temp.G.plot_network()
+fig, ax = temp.G.plot_reservoirs(fig=fig, ax=ax)
+fig.legend()
 fig.show()
-
-fig1, ax1 = plt.subplots(1,1)
-ax1.spy(temp.A12)
-fig1.show()
-
-fig2, ax2 = plt.subplots(1,1)
-ax2.spy(temp.A10)
-fig2.show()
+temp.G.figshow_leaflet(fig)

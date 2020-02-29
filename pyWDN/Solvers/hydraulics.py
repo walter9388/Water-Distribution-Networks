@@ -22,9 +22,9 @@ def evaluate_hydraulic(a):#nn,np,nl,demands,headloss,nulldata,auxdata):
             if 'Eta' in a.nulldata:
                 Eta = a.nulldata['Eta']
                 A13 = a.nulldata['A13']
-                Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace_Valves(a.A12, a.A12.T, a.A10, A13, a.H0[:,kk], Eta[:,kk], a.headloss['n_exp'], q_0, h_0, a.demands[:,kk], a.np, a.nulldata, a.auxdata)
+                Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(a.A12, a.A12.T, a.A10, A13, a.H0[:,kk], Eta[:,kk], a.headloss['n_exp'], q_0, h_0, a.demands[:,kk], a.np, a.nulldata, a.auxdata)
             else:
-                Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace_Valves(a.A12, a.A12.T, a.A10, [], a.H0[:,kk], [], a.headloss['n_exp'], q_0, h_0, a.demands[:,kk], a.np, a.nulldata, a.auxdata)
+                Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(a.A12, a.A12.T, a.A10, [], a.H0[:,kk], [], a.headloss['n_exp'], q_0, h_0, a.demands[:,kk], a.np, a.nulldata, a.auxdata)
         elif a.headloss['formula']=='D-W':
             pass
             # auxdata.DIAMETERS = data.DIAMETERS;
@@ -52,7 +52,7 @@ def evaluate_hydraulic(a):#nn,np,nl,demands,headloss,nulldata,auxdata):
     return H, Q
 
 
-def solveHW_Nullspace_Valves(A12, A21, A10, A13, h0, eta, n_exp, qk, hk, d, NP, nulldata, auxdata):
+def solveHW_Nullspace(A12, A21, A10, A13, h0, eta, n_exp, qk, hk, d, NP, nulldata, auxdata):
     '''Based on the work of Edo Abraham, Imperial College London, 2014'''
 
     ResCoeff = auxdata['ResCoeff']
@@ -152,6 +152,10 @@ def solveHW_Nullspace_Valves(A12, A21, A10, A13, h0, eta, n_exp, qk, hk, d, NP, 
 if __name__=='__main__':
     import os
     import pyWDN
+    import time
     filename = os.path.join(os.path.dirname(os.getcwd()), 'NetworkFiles\\25nodesData.mat')
     temp = pyWDN.WDNbuild.BuildWDN_fromMATLABfile(filename)
+    t = time.time()
     H,Q = evaluate_hydraulic(temp)
+    elapsed = time.time() - t
+    print(elapsed) # MATLAB runs the same network simulation in 0.155s
