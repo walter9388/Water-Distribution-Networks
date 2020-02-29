@@ -1,5 +1,8 @@
 from pyWDN.WDNbuild.MakeSparseMatrices import *
 from pyWDN.Solvers.hydraulics import evaluate_hydraulic
+from pyWDN.Plotting.NetworkGraph import makenetworkgraph
+from pyWDN.Plotting.OS2WGS import OSGB36toWGS84
+import scipy.sparse as sp
 
 
 class BuildWDN:
@@ -40,9 +43,21 @@ class BuildWDN:
         self.auxdata['kappa'] = 1e7
         self.auxdata['tol_err'] = 1e-6
 
-    def evaluate_hydraulics(self):
-
+    def evaluate_hydraulics(self,**kwargs):
+        # todo: add kwargs for evaluate_hydraulics
+        # A12 = kwargs.get('A12', self.A12)
         H_sim, Q_sim = evaluate_hydraulic(self)
+
+    def make_network_graph(self):
+        x = [self.junctions[i]['Coords'][0] for i in range(self.nn)] + [self.reservoirs[i]['Coords'][0] for i in range(self.n0)]
+        y = [self.junctions[i]['Coords'][1] for i in range(self.nn)] + [self.reservoirs[i]['Coords'][1] for i in range(self.n0)]
+        A = sp.hstack((self.A12, self.A10))
+        if np.all(np.array(x+y)>1e4) and np.all(np.array(x+y)<1e6): # if OS coordinates:
+            for i in range(len(x)):
+                y[i], x[i] = OSGB36toWGS84(x[i], y[i])
+        H0_nodes=[self.NodeIdMap[self.reservoirs[i]['Id']] for i in range(self.n0)]
+        self.G = makenetworkgraph(x,y,A,H0_nodes=H0_nodes)
+
 
 
 class BuildWDN_fromMATLABfile(BuildWDN):
@@ -57,23 +72,56 @@ class BuildWDN_fromMATLABfile(BuildWDN):
 
         # define pipes
         p = tmf['pipes'][0]
-        pipes = [
-            {
-                list(p[j][0].dtype.fields.keys())[i]: p[j][0][0][i][0] if isinstance(p[j][0][0][i][0], str) else
-                p[j][0][0][i][0][0] for i in range(len(list(p[j][0].dtype.fields.keys())))
-            }
-            for j in range(len(p))
-        ]
+        # pipes = [
+        #     {
+        #         list(p[j][0].dtype.fields.keys())[i]: p[j][0][0][i][0] if isinstance(p[j][0][0][i][0], str) else
+        #         p[j][0][0][i][0][0] for i in range(len(list(p[j][0].dtype.fields.keys())))
+        #     }
+        #     for j in range(len(p))
+        # ]
+        pipes=[]
+        for j in range(len(p)):
+            tempdic={}
+            for i in range(len(list(p[j][0].dtype.fields.keys()))):
+                tempdickey=list(p[j][0].dtype.fields.keys())[i]
+                if len(p[j][0][0][i])==0:
+                    tempdic[tempdickey]=''
+                elif isinstance(p[j][0][0][i][0], str):
+                    tempdic[tempdickey] = p[j][0][0][i][0]
+                else:
+                    tempdic[tempdickey] = p[j][0][0][i][0][0]
+            # check if length, roughness and dimater are included
+            if 'Roughness' not in tempdic:
+                tempdic['Roughness'] = tmf['C'][0][0]
+            if 'Length' not in tempdic:
+                tempdic['Length'] = tmf['L'][0][0]
+            if 'Diameter' not in tempdic:
+                tempdic['Diameter'] = tmf['D'][0][0]
+            pipes.append(tempdic)
 
         # define junctions
         p = tmf['junctions'][0]
-        junctions = [
-            {
-                list(p[j][0].dtype.fields.keys())[i]: p[j][0][0][i][0] if isinstance(p[j][0][0][i][0], str) else
-                p[j][0][0][i][0][0] for i in range(len(list(p[j][0].dtype.fields.keys())))
-            }
-            for j in range(len(p))
-        ]
+        # couldn't handle empty keys (e.g. Patterns):
+        # junctions = [
+        #     {
+        #         list(p[j][0].dtype.fields.keys())[i]: p[j][0][0][i][0] if isinstance(p[j][0][0][i][0], str) else
+        #         p[j][0][0][i][0][0] for i in range(len(list(p[j][0].dtype.fields.keys())))
+        #     }
+        #     for j in range(len(p))
+        # ]
+        junctions=[]
+        for j in range(len(p)):
+            tempdic={}
+            for i in range(len(list(p[j][0].dtype.fields.keys()))):
+                tempdickey=list(p[j][0].dtype.fields.keys())[i]
+                if len(p[j][0][0][i])==0:
+                    tempdic[tempdickey]=''
+                elif isinstance(p[j][0][0][i][0], str):
+                    tempdic[tempdickey] = p[j][0][0][i][0]
+                else:
+                    tempdic[tempdickey] = p[j][0][0][i][0][0]
+            junctions.append(tempdic)
+
 
         # define reservoirs
         p = tmf['reservoirs'][0]
@@ -102,7 +150,7 @@ class BuildWDN_fromMATLABfile(BuildWDN):
         for j in range(self.nn):
             self.junctions[j].update(
                 {
-                    'Coords': tuple(tmf['junctionXYData'][0][i][0].split()[1:])
+                    'Coords': tuple(map(float,tmf['junctionXYData'][0][i][0].split()[1:]))
                     for i in range(len(tmf['junctionXYData'][0])) if
                     tmf['junctionXYData'][0][i][0].split()[0] == self.junctions[j]['Id']
                 }
@@ -110,7 +158,7 @@ class BuildWDN_fromMATLABfile(BuildWDN):
         for j in range(self.n0):
             self.reservoirs[j].update(
                 {
-                    'Coords': tuple(tmf['junctionXYData'][0][i][0].split()[1:])
+                    'Coords': tuple(map(float,tmf['junctionXYData'][0][i][0].split()[1:]))
                     for i in range(len(tmf['junctionXYData'][0])) if
                     tmf['junctionXYData'][0][i][0].split()[0] == self.reservoirs[j]['Id']
                 }
@@ -148,8 +196,9 @@ class BuildWDN_fromMATLABfile(BuildWDN):
         self.IndexValves = self.PRVs + self.BVs
 
         # add all remaining variables in tmf as attributes to the WDN class
+        dontbuild=['n_exp','junctionXYData']
         for i in range(tmf.keys().__len__()):
-            if list(tmf.keys())[i] not in self.__dir__() and list(tmf.keys())[i] != 'n_exp':
+            if list(tmf.keys())[i] not in self.__dir__() and list(tmf.keys())[i] not in dontbuild:
                 attr_name = list(tmf.keys())[i]
                 self.__setattr__(attr_name, tmf[attr_name])
 
