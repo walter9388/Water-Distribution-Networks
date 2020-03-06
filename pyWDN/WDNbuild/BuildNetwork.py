@@ -3,6 +3,7 @@ from pyWDN.Solvers.hydraulics import evaluate_hydraulic
 from pyWDN.Plotting.NetworkGraph import makenetworkgraph
 from pyWDN.Plotting.OS2WGS import OSGB36toWGS84
 import scipy.sparse as sp
+import os, re
 
 
 class BuildWDN:
@@ -44,9 +45,16 @@ class BuildWDN:
         self.auxdata['tol_err'] = 1e-6
 
     def evaluate_hydraulics(self,**kwargs):
-        # todo: add kwargs for evaluate_hydraulics
-        # A12 = kwargs.get('A12', self.A12)
-        H_sim, Q_sim = evaluate_hydraulic(self)
+        # store temporarily the class attributes which are being replaced
+        temp_dict = {key: self.__getattribute__(key) for key, value in kwargs.items()}
+        # replace attributes with new attributes from kwargs
+        self.__dict__.update((key, value) for key, value in kwargs.items())
+        # evaluate hydraulics
+        self.h_sim, self.q_sim = evaluate_hydraulic(self.A12, self.A10, self.C, self.D, self.demands, self.H0,
+                                                    self.IndexValves, self.L, self.nn, self.np, self.nl, self.headloss,
+                                                    self.nulldata, self.auxdata)
+        # reset class attributes to origin values
+        self.__dict__.update((key, value) for key, value in temp_dict.items())
 
     def make_network_graph(self):
         x = [self.junctions[i]['Coords'][0] for i in range(self.nn)] + [self.reservoirs[i]['Coords'][0] for i in range(self.n0)]
@@ -61,14 +69,26 @@ class BuildWDN:
 
 
 class BuildWDN_fromMATLABfile(BuildWDN):
-    def __init__(self, filename):
+    def __init__(self, *filenamein):
+        # define filename
+        if len(filenamein) > 1:
+            raise ValueError('only put the filename in')
+        networks_root=os.path.join(os.path.dirname(os.path.dirname(__file__)), 'NetworkFiles')
+        networks_files=os.listdir(networks_root)
+        pattern=('^(' + filenamein[0] + '|' + filenamein[0] + '.mat){1}$').encode('unicode_escape').decode()
+        filebool=[re.match(pattern, networks_files[i]) is not None for i in range(len(networks_files))]
+        if np.any(filebool):
+            filename=os.path.join(networks_root,networks_files[filebool.index(True)])
+        else:
+            filename=filenamein[0]
+
         # import .mat file
         import scipy.io as sc
         import warnings
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             tmf = sc.loadmat(filename)
-        self.tmf = tmf
+        self._tmf = tmf
 
         # define pipes
         p = tmf['pipes'][0]
@@ -188,7 +208,7 @@ class BuildWDN_fromMATLABfile(BuildWDN):
             ]
 
         # nl
-        self.nl = tmf['nl'][0][0]
+        self.nl = int(tmf['nl'][0][0])
 
         #PRVs/BVs/indexvalves
         self.PRVs = list(tmf['PRVs'])

@@ -1,42 +1,43 @@
 import numpy as np
 import scipy.sparse.linalg as spla
 import scipy.sparse as sp
+import psutil
 
-def evaluate_hydraulic(a):#nn,np,nl,demands,headloss,nulldata,auxdata):
-    H = np.empty((a.nn,a.nl)) * np.nan
-    Q = np.empty((a.np,a.nl)) * np.nan
-    err = np.zeros(a.nl)
-    iter = np.zeros(a.nl)
-    CONDS = np.zeros(a.nl)
-    check = np.zeros(a.nl)
-    for kk in range(a.nl):
-        xtemp = spla.spsolve(a.nulldata['L_A12'],a.nulldata['Pr'] @ a.demands[:,kk])
-        w = a.nulldata['Pr'].T @ spla.spsolve(a.nulldata['L_A12'].T,xtemp)
-        xtemp = a.A12 @ w
-        a.nulldata['x'] = xtemp
-        q_0 = 0.3 * np.ones((a.np, 1))
-        h_0 = 130 * np.ones((a.nn, 1))
-        if a.headloss['formula']=='H-W':
-            a.auxdata['ResCoeff'] = 10.670 * a.L / (a.C ** a.headloss['n_exp'] * (a.D/1000) ** 4.871)
-            a.auxdata['ResCoeff'][a.IndexValves] = (8 / (np.pi ** 2 * 9.81)) * (a.D[a.IndexValves]/1000) ** -4 * a.C[a.IndexValves]
-            if 'Eta' in a.nulldata:
-                Eta = a.nulldata['Eta']
-                A13 = a.nulldata['A13']
-                Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(a.A12, a.A12.T, a.A10, A13, a.H0[:,kk], Eta[:,kk], a.headloss['n_exp'], q_0, h_0, a.demands[:,kk], a.np, a.nulldata, a.auxdata)
+def evaluate_hydraulic(A12,A10,C,D,demands,H0,IndexValves,L,nn,NP,nl,headloss,nulldata,auxdata):
+    H = np.empty((nn,nl)) * np.nan
+    Q = np.empty((NP,nl)) * np.nan
+    err = np.zeros(nl)
+    iter = np.zeros(nl)
+    CONDS = np.zeros(nl)
+    check = np.zeros(nl)
+    for kk in range(nl):
+        xtemp = spla.spsolve(nulldata['L_A12'],nulldata['Pr'] @ demands[:,kk])
+        w = nulldata['Pr'].T @ spla.spsolve(nulldata['L_A12'].T,xtemp)
+        xtemp = A12 @ w
+        nulldata['x'] = xtemp
+        q_0 = 0.3 * np.ones((NP, 1))
+        h_0 = 130 * np.ones((nn, 1))
+        if headloss['formula']=='H-W':
+            auxdata['ResCoeff'] = 10.670 * L / (C ** headloss['n_exp'] * (D/1000) ** 4.871)
+            auxdata['ResCoeff'][IndexValves] = (8 / (np.pi ** 2 * 9.81)) * (D[IndexValves]/1000) ** -4 * C[IndexValves]
+            if 'Eta' in nulldata:
+                Eta = nulldata['Eta']
+                A13 = nulldata['A13']
+                Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(A12, A12.T, A10, A13, H0[:,kk], Eta[:,kk], headloss['n_exp'], q_0, h_0, demands[:,kk], NP, nulldata, auxdata)
             else:
-                Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(a.A12, a.A12.T, a.A10, [], a.H0[:,kk], [], a.headloss['n_exp'], q_0, h_0, a.demands[:,kk], a.np, a.nulldata, a.auxdata)
-        elif a.headloss['formula']=='D-W':
+                Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(A12, A12.T, A10, [], H0[:,kk], [], headloss['n_exp'], q_0, h_0, demands[:,kk], NP, nulldata, auxdata)
+        elif headloss['formula']=='D-W':
             pass
-            # auxdata.DIAMETERS = data.DIAMETERS;
-            # auxdata.ROUGHNESS = zeros(np, 1);
-            # auxdata.ROUGHNESS(setdiff(1: data.NP, data.IndexValves))=1e-3 * u(setdiff(1: data.NP, data.IndexValves));
-            # auxdata.ROUGHNESS(data.IndexValves) = u(data.IndexValves);
-            #.. auxdata.IndexValves = data.IndexValves;
-            # auxdata.LENGTHS = data.LENGTHS;
+            # auxdatDIAMETERS = datDIAMETERS;
+            # auxdatROUGHNESS = zeros(np, 1);
+            # auxdatROUGHNESS(setdiff(1: datNP, datIndexValves))=1e-3 * u(setdiff(1: datNP, datIndexValves));
+            # auxdatROUGHNESS(datIndexValves) = u(datIndexValves);
+            #.. auxdatIndexValves = datIndexValves;
+            # auxdatLENGTHS = datLENGTHS;
             # n_exp = 2 * ones(np, 1);
             # if isfield(data, 'Eta')
-            # Eta = data.Eta;
-            # A13 = data.A13;
+            # Eta = datEta;
+            # A13 = datA13;
             # [qtemp, htemp, err(kk), iter(kk), CONDS(kk), ERRORS(kk)] = minor_losses_solveDW_Nullspace_Valves_QuadraticConvergence(
             #     A12, A12
             # ',A10,A13,H0(:,kk),Eta(:,kk),n_exp,q_0,h_0,demands(:,kk),np,nulldata,auxdata);
@@ -46,7 +47,7 @@ def evaluate_hydraulic(a):#nn,np,nl,demands,headloss,nulldata,auxdata):
             # ',A10,[],H0(:,kk),[],n_exp,q_0,h_0,demands(:,kk),np,nulldata,auxdata);
 
         print('Time Step: %i'%(kk+1))
-        # if ERRORS > a.auxdata['tol_err']:
+        # if ERRORS > auxdata['tol_err']:
         #     check[kk] = 1
 
     return H, Q
@@ -153,9 +154,19 @@ if __name__=='__main__':
     import os
     import pyWDN
     import time
-    filename = os.path.join(os.path.dirname(os.getcwd()), 'NetworkFiles\\25nodesData.mat')
+    filename = '25nodesData'
     temp = pyWDN.WDNbuild.BuildWDN_fromMATLABfile(filename)
-    t = time.time()
-    H,Q = evaluate_hydraulic(temp)
-    elapsed = time.time() - t
-    print(elapsed) # MATLAB runs the same network simulation in 0.155s
+    for _ in range(5):
+        t = time.time()
+        temp.evaluate_hydraulics()
+        elapsed = time.time() - t
+        print('Python: ' + str(elapsed)) # MATLAB runs the same network simulation in 0.155s
+
+    from pyWDN.Solvers.call_ju import *
+
+    # call_julia('hydraulics_ju.jl', 'funfun', temp.A12)
+    for _ in range(5):
+        t = time.time()
+        H,Q = call_julia('hydraulics_ju.jl', 'evaluate_hydraulics', temp.A12, temp.A10, temp.C, temp.D, temp.demands, temp.H0, temp.IndexValves, temp.L, temp.nn, temp.np, temp.nl, temp.headloss, temp.nulldata, temp.auxdata)
+        elapsed2 = time.time() - t
+        print('Julia: ' + str(elapsed2))
