@@ -1,7 +1,7 @@
 import pyWDN
 
 filename = '25nodesData'
-filename = 'BURWELMA_2019-12-25_-_2019-12-27'
+filename = 'BURWELMA_2019-12-27_-_2019-12-28'
 # filename = r'C:\Users\walte\Documents\python\Water-Distribution-Networks\pyWDN\NetworkFiles\Daily\2018_06_06\BWFLnet_DMA1_06_06_2018__07_06_2018.mat'
 
 temp = pyWDN.WDNbuild.BuildWDN_fromMATLABfile(filename)

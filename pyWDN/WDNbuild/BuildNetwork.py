@@ -44,7 +44,7 @@ class BuildWDN:
         self.auxdata['kappa'] = 1e7
         self.auxdata['tol_err'] = 1e-6
 
-    def evaluate_hydraulics(self,**kwargs):
+    def evaluate_hydraulics(self, print_timestep=True, **kwargs):
         # store temporarily the class attributes which are being replaced
         temp_dict = {key: self.__getattribute__(key) for key, value in kwargs.items()}
         # replace attributes with new attributes from kwargs
@@ -52,7 +52,7 @@ class BuildWDN:
         # evaluate hydraulics
         self.h_sim, self.q_sim = evaluate_hydraulic(self.A12, self.A10, self.C, self.D, self.demands, self.H0,
                                                     self.IndexValves, self.L, self.nn, self.np, self.nl, self.headloss,
-                                                    self.nulldata, self.auxdata)
+                                                    self.nulldata, self.auxdata, print_timestep=print_timestep)
         # reset class attributes to origin values
         self.__dict__.update((key, value) for key, value in temp_dict.items())
 
@@ -108,15 +108,17 @@ class BuildWDN_fromMATLABfile(BuildWDN):
                     tempdic[tempdickey]=''
                 elif isinstance(p[j][0][0][i][0], str):
                     tempdic[tempdickey] = p[j][0][0][i][0]
+                elif tempdickey == 'Diameter':
+                    tempdic[tempdickey] = p[j][0][0][i][0][0] / 1000 # mm -> m
                 else:
                     tempdic[tempdickey] = p[j][0][0][i][0][0]
-            # check if length, roughness and dimater are included
+            # check if length, roughness and diameter are included
             if 'Roughness' not in tempdic:
-                tempdic['Roughness'] = tmf['C'][0][0]
+                tempdic['Roughness'] = tmf['C'][j, 0]
             if 'Length' not in tempdic:
-                tempdic['Length'] = tmf['L'][0][0]
+                tempdic['Length'] = tmf['L'][j, 0]
             if 'Diameter' not in tempdic:
-                tempdic['Diameter'] = tmf['D'][0][0]
+                tempdic['Diameter'] = tmf['D'][j, 0]
             pipes.append(tempdic)
 
         # define junctions

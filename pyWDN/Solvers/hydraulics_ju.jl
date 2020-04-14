@@ -9,6 +9,10 @@ using Printf
 # import BenchmarkTools: @btime
 import Base: convert #, promote_rule, promote, @time
 
+# print(Threads.nthreads())
+# export JULIA_NUM_THREADS=4
+# Threads.nthreads()
+
 # PyObject to julia sparse conversion
 mk_sparse(o) = SparseMatrixCSC(o.shape[1], o.shape[2], o.indptr .+ 1, o.indices .+ 1, o.data)
 # converts PyObject to sparsematricies when needed
