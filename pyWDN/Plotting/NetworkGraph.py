@@ -3,6 +3,9 @@ import networkx as nx
 import scipy as sc
 import matplotlib.pyplot as plt
 import mplleaflet
+import osmnx as ox
+import folium
+
 
 class makenetworkgraph:
 
@@ -10,11 +13,11 @@ class makenetworkgraph:
         self.x = x
         self.y = y
         self.A = A
-        G = nx.DiGraph()
+        G = ox.nx.MultiDiGraph()
         for i in range(len(x)):
-            G.add_node(i, pos=(x[i], y[i]))
+            G.add_node(i, x=x[i], y=y[i], pos=(x[i],y[i]))
         for i in range(A.shape[0]):
-            G.add_edge(int(sc.sparse.find(A[i, :] == 1)[1][0]), int(sc.sparse.find(A[i, :] == -1)[1][0]))
+            G.add_edge(int(sc.sparse.find(A[i, :] == 1)[1][0]), int(sc.sparse.find(A[i, :] == -1)[1][0]), name='asdfasd')
         self.G = G
         H0_nodes = kwargs.get('H0_nodes', None)
         if H0_nodes is not None:
@@ -22,7 +25,7 @@ class makenetworkgraph:
 
 
     def plot(self, outputtype, **kwargs):
-        pos = nx.get_node_attributes(self.G, 'pos')
+        pos = ox.nx.get_node_attributes(self.G, 'pos')
         fig = plt.figure()
         plt.title('Pressure Simulation - date/time')
         node_size = kwargs.get('node_size', 0)
@@ -30,7 +33,7 @@ class makenetworkgraph:
         if type(node_color) != str:
             vmin = np.floor((min(node_color) / 10)) * 10
             vmax = np.ceil((max(node_color) / 10)) * 10
-            nx.draw(self.G, pos, node_size=node_size, arrows=False, node_color=node_color, cmap=plt.cm.jet, vmin=vmin,
+            ox.nx.draw(self.G, pos, node_size=node_size, arrows=False, node_color=node_color, cmap=plt.cm.jet, vmin=vmin,
                     vmax=vmax)
             if outputtype == "leaflet":
                 mplleaflet.show(fig)
@@ -42,8 +45,8 @@ class makenetworkgraph:
                 plt.show()
 
         else:
-            nx.draw(self.G, pos, node_size=node_size, arrows=False, node_color=node_color)
-            nx.draw_networkx_nodes(self.G, pos, nodelist=[3,5],nodesize=10,node_color='r')
+            ox.nx.draw(self.G, pos, node_size=node_size, arrows=False, node_color=node_color)
+            ox.nx.draw_networkx_nodes(self.G, pos, nodelist=[3,5],nodesize=10,node_color='r')
             fig.show()
             if outputtype == "leaflet":
                 mplleaflet.show(fig)
@@ -59,8 +62,8 @@ class makenetworkgraph:
         elif fig is None:
             fig = plt.figure()
 
-        pos = nx.get_node_attributes(self.G, 'pos')
-        nx.draw(self.G, pos, node_size=node_size, arrows=False, node_color=node_color,ax=ax,label=label)
+        pos = ox.nx.get_node_attributes(self.G, 'pos')
+        ox.nx.draw(self.G, pos, node_size=node_size, arrows=False, node_color=node_color,ax=ax,label=label)
         return fig, ax
 
     def plot_reservoirs(self,**kwargs):
@@ -71,11 +74,50 @@ class makenetworkgraph:
             fig, ax = plt.subplots(1, 1)
         elif fig is None:
             fig = plt.figure()
-        pos = nx.get_node_attributes(self.G, 'pos')
-        nx.draw_networkx_nodes(self.G, pos, nodelist=self.H0_nodes, nodesize=10, node_color='r',ax=ax,label=label)
+        pos = ox.nx.get_node_attributes(self.G, 'pos')
+        ox.nx.draw_networkx_nodes(self.G, pos, nodelist=self.H0_nodes, nodesize=10, node_color='r',ax=ax,label=label)
         return fig, ax
 
 
     def figshow_leaflet(self,fig):
         mplleaflet.show(fig)
 
+
+    def make_folium(self,**kwargs):
+        # filename = kwargs.get('filename','folium_output_.html')
+
+        mapboxtoken = 'pk.eyJ1Ijoid2FsdGVyOTM4OCIsImEiOiJjazhzbmhocGUwMWEyM25uZDd1Z3hwYjA4In0.5JWjuw2ZyuHVzxnvNx1cfQ'
+        # username_id='walter9388.ck8snlelx2cep1intbso64rza'
+        username_id = 'mapbox.dark'
+
+        self.G.graph = {'crs': 'WGS84',
+                        'name': 'unnamed',
+                        }
+
+        map = folium.Map(location=[0, 0],
+                         zoom_start=12,
+                         tiles=None,
+                         )
+        folium.TileLayer(
+            'http://api.mapbox.com/v4/' + username_id + '/{z}/{x}/{y}.png?access_token=' + mapboxtoken,
+            attr='Mapbox | Source: InfraSense Labs | Written by Alex Waldron, 2020',
+            name='Base Map',
+        ).add_to(map)
+
+        network_fg = folium.FeatureGroup(name='Distribution Mains')
+        map.add_child(network_fg)
+        graph_map = ox.plot_graph_folium(self.G,
+                                         edge_width=1,
+                                         edge_color='#FFFFFF',
+                                         popup_attribute='name',
+                                         # graph_map=map,
+                                         )
+
+        temp = list(graph_map._children.keys())[1:-1]
+        [graph_map._children[temp[i]].add_to(network_fg) for i in range(len(temp))]
+        map.fit_bounds(map.get_bounds())
+        folium.LayerControl().add_to(map)
+
+        self.folium_map = map
+        # filepath = 'folium_output_.html'
+        # map.save(filename)
