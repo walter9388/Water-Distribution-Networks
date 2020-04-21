@@ -2,6 +2,26 @@ import numpy as np
 import scipy.sparse.linalg as spla
 import scipy.sparse as sp
 import psutil
+from datetime import datetime as dt
+from datetime import timedelta as td
+
+
+def get_scaled_demand(demand,total_flow,flow_dt):
+    if len(flow_dt) != len(total_flow):
+        raise ValueError('flow and datetime should be the same length')
+    int_secs=(60*60*24)/demand.shape[1]
+    mult_dt=np.arange(dt(2020, 1, 1), dt(2020, 1, 2), td(seconds=int_secs), dtype=dt)
+    mult_dt=[(mult_dt[i].hour, mult_dt[i].minute) for i in range(len(mult_dt))]
+    flow_dt=[(flow_dt[i].hour, flow_dt[i].minute) for i in range(len(flow_dt))]
+    demand_ts=[np.where((flow_dt[i]==np.array(mult_dt)).all(axis=1))[0][0] for i in range(len(flow_dt))]
+    demand_sum=demand.sum(axis=0)
+
+    new_demands=np.zeros((demand.shape[0],len(flow_dt)))
+    for i in range(len(flow_dt)):
+        new_demands[:,i] = demand[:,demand_ts[i]]*total_flow[i]/demand_sum[demand_ts[i]]
+
+    return new_demands
+
 
 
 def evaluate_hydraulic(A12, A10, C, D, demands, H0, IndexValves, L, nn, NP, nl, headloss, nulldata, auxdata, print_timestep=True):
@@ -465,10 +485,10 @@ if __name__ == '__main__':
 
     #### test H-W solver ######
 
-    filename = '25nodesData'
-    temp = pyWDN.WDNbuild.BuildWDN_fromMATLABfile(filename)
-    temp.evaluate_hydraulics()
-    print(temp.q_sim)
+    # filename = '25nodesData'
+    # temp = pyWDN.WDNbuild.BuildWDN_fromMATLABfile(filename)
+    # temp.evaluate_hydraulics()
+    # print(temp.q_sim)
 
 
     # #### test julia times vs python #####
