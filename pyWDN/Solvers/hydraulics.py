@@ -4,21 +4,47 @@ import scipy.sparse as sp
 import psutil
 from datetime import datetime as dt
 from datetime import timedelta as td
+from tqdm import tqdm
 
 
-def get_scaled_demand(demand,total_flow,flow_dt):
-    if len(flow_dt) != len(total_flow):
+def get_scaled_demand(demand, flow_in, flow_dt, flow_out=None):
+    '''
+    :param demand: 2D-numpy-array of dimensions nn x nl
+    :param flow_in: 2D-numpy-array of dimensions n_flows_in x nl
+    :param flow_dt: list of datetimes corresponding to n_flows (currently 15 min timesteps only)
+    :param flow_out: OPTIONAL: None if no measured out flow avaliable, else a list of dictionaries which the outflow
+    node ID (so the demand at that point can be adjusted to mimic flow out) and a 1D-numpy-array of dimension nl,
+    e.g. flow_out = [dict(index=7, data=np.array([1,2,3,4]))]
+    :return:
+    '''
+    if (len(flow_dt) != len(flow_in)):
         raise ValueError('flow and datetime should be the same length')
-    int_secs=(60*60*24)/demand.shape[1]
-    mult_dt=np.arange(dt(2020, 1, 1), dt(2020, 1, 2), td(seconds=int_secs), dtype=dt)
-    mult_dt=[(mult_dt[i].hour, mult_dt[i].minute) for i in range(len(mult_dt))]
-    flow_dt=[(flow_dt[i].hour, flow_dt[i].minute) for i in range(len(flow_dt))]
-    demand_ts=[np.where((flow_dt[i]==np.array(mult_dt)).all(axis=1))[0][0] for i in range(len(flow_dt))]
-    demand_sum=demand.sum(axis=0)
 
-    new_demands=np.zeros((demand.shape[0],len(flow_dt)))
+    # determine the total amount of water used at each time step (i.e. flow_in - flow_out)
+    if flow_out is not None:
+        total_dem = flow_in.sum(axis=1) - np.vstack([flow_out[ii]['data'] for ii in range(len(flow_out))]).sum(axis=0)
+    else:
+        total_dem = flow_in.sum(axis=1)
+
+    # create multiplier array aligned with datetime for slicing (written cumbersomely, can be updated in the future)
+    int_secs = (60*60*24)/demand.shape[1]
+    mult_dt = np.arange(dt(2020, 1, 1), dt(2020, 1, 2), td(seconds=int_secs), dtype=dt)
+    mult_dt = [(mult_dt[i].hour, mult_dt[i].minute) for i in range(len(mult_dt))]
+    flow_dt = [(flow_dt[i].hour, flow_dt[i].minute) for i in range(len(flow_dt))]
+
+    # get the index of which column in the demand series should be reallocated as a comparison of the datetime arrays
+    demand_ts = [np.where((flow_dt[i] == np.array(mult_dt)).all(axis=1))[0][0] for i in range(len(flow_dt))]
+
+    # create new rescaled demands based on the total demand data
+    demand_sum = demand.sum(axis=0)
+    new_demands = np.zeros((demand.shape[0], len(flow_dt)))
     for i in range(len(flow_dt)):
-        new_demands[:,i] = demand[:,demand_ts[i]]*total_flow[i]/demand_sum[demand_ts[i]]
+        new_demands[:, i] = demand[:, demand_ts[i]]*total_dem[i]/demand_sum[demand_ts[i]]
+
+    # add any flows out as demands, thus addressing the mass balance
+    if flow_out is not None:
+        for ii in range(len(flow_out)):
+            new_demands[flow_out[ii]['index'], :] += flow_out[ii]['data']
 
     return new_demands
 
@@ -43,44 +69,50 @@ def evaluate_hydraulic(A12, A10, C, D, demands, H0, IndexValves, L, nn, NP, nl, 
         Eta = np.zeros((0, nl))
         A13 = np.zeros((0, nl))
 
-    for kk in range(nl):
-        xtemp = spla.spsolve(nulldata['L_A12'], nulldata['Pr'] @ demands[:, kk])
-        w = nulldata['Pr'].T @ spla.spsolve(nulldata['L_A12'].T, xtemp)
-        xtemp = A12 @ w
-        nulldata['x'] = xtemp
-        q_0 = 0.3 * np.ones((NP, 1))
-        h_0 = 130 * np.ones((nn, 1))
-        if headloss['formula'] == 'H-W':
-            auxdata['ResCoeff'] = 10.670 * L / (C ** headloss['n_exp'] * D ** 4.871)
-            auxdata['ResCoeff'][IndexValves] = (8 / (np.pi ** 2 * 9.81)) * D[IndexValves] ** -4 * C[IndexValves]
-            # # if 'Eta' in nulldata:
-            # #     Eta = nulldata['Eta']
-            # #     A13 = nulldata['A13']
-            # Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(A12, A12.T, A10, A13, H0[:,kk], Eta[:,kk], headloss['n_exp'], q_0, h_0, demands[:,kk], NP, nulldata, auxdata)
-            # # else:
-            # #     Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(A12, A12.T, A10, [], H0[:,kk], [], headloss['n_exp'], q_0, h_0, demands[:,kk], NP, nulldata, auxdata)
-        elif headloss['formula'] == 'D-W':
-            auxdata['D'] = D[:, np.newaxis]
-            auxdata['C'] = C[:, np.newaxis]
-            auxdata['L'] = L[:, np.newaxis]
-            auxdata['ResCoeff'] = np.zeros((NP, 1))
-            # Q[:, kk], H[:, kk], err[kk], iter[kk], CONDS[kk], check[kk] = DW_temp(A12, A12.T, A10, A13,
-            #                                                                           H0[:, kk], Eta[:, kk],
-            #                                                                           headloss['n_exp'], q_0, h_0,
-            #                                                                           demands[:, kk], NP,
-            #                                                                           nulldata, auxdata)
+    with tqdm(range(nl)) as pbar:
+        for kk in pbar:
+            pbar.set_description(f'Timestep {kk}')
+            xtemp = spla.spsolve(nulldata['L_A12'], nulldata['Pr'] @ demands[:, kk])
+            w = nulldata['Pr'].T @ spla.spsolve(nulldata['L_A12'].T, xtemp)
+            xtemp = A12 @ w
+            nulldata['x'] = xtemp
+            q_0 = 0.3 * np.ones((NP, 1))
+            h_0 = 130 * np.ones((nn, 1))
+            if headloss['formula'] == 'H-W':
+                auxdata['ResCoeff'] = 10.670 * L / (C ** headloss['n_exp'] * D ** 4.871)
+                auxdata['ResCoeff'][IndexValves] = (8 / (np.pi ** 2 * 9.81)) * D[IndexValves] ** -4 * C[IndexValves]
+                # # if 'Eta' in nulldata:
+                # #     Eta = nulldata['Eta']
+                # #     A13 = nulldata['A13']
+                # Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(A12, A12.T, A10, A13, H0[:,kk], Eta[:,kk], headloss['n_exp'], q_0, h_0, demands[:,kk], NP, nulldata, auxdata)
+                # # else:
+                # #     Q[:,kk], H[:,kk], err[kk], iter[kk], CONDS[kk], check[kk] = solveHW_Nullspace(A12, A12.T, A10, [], H0[:,kk], [], headloss['n_exp'], q_0, h_0, demands[:,kk], NP, nulldata, auxdata)
+            elif headloss['formula'] == 'D-W':
+                auxdata['D'] = D[:, np.newaxis]
+                auxdata['C'] = C[:, np.newaxis]
+                auxdata['L'] = L[:, np.newaxis]
+                auxdata['ResCoeff'] = np.zeros((NP, 1))
+                # Q[:, kk], H[:, kk], err[kk], iter[kk], CONDS[kk], check[kk] = DW_temp(A12, A12.T, A10, A13,
+                #                                                                           H0[:, kk], Eta[:, kk],
+                #                                                                           headloss['n_exp'], q_0, h_0,
+                #                                                                           demands[:, kk], NP,
+                #                                                                           nulldata, auxdata)
 
-        Q[:, kk], H[:, kk], err[kk], iter[kk], CONDS[kk], check[kk] = solve_Nullspace(A12, A12.T, A10, A13,
-                                                                                      H0[:, kk], Eta[:, kk],
-                                                                                      headloss['n_exp'], q_0, h_0,
-                                                                                      demands[:, kk], NP,
-                                                                                      nulldata, auxdata,
-                                                                                      headloss['formula'])
+            Q[:, kk], H[:, kk], err_, iter_, CONDS[kk], check[kk] = solve_Nullspace(A12, A12.T, A10, A13,
+                                                                                          H0[:, kk], Eta[:, kk],
+                                                                                          headloss['n_exp'], q_0, h_0,
+                                                                                          demands[:, kk], NP,
+                                                                                          nulldata, auxdata,
+                                                                                          headloss['formula'])
+            err[kk], iter[kk] = err_, iter_
 
-        if print_timestep:
-            print('Time Step: %i' % (kk + 1))
-        # if ERRORS > auxdata['tol_err']:
-        #     check[kk] = 1
+            pbar.set_postfix({'Error': err_, 'Iteration': iter_})
+            # if print_timestep:
+            #     print('Time Step: %i' % (kk + 1))
+            # if ERRORS > auxdata['tol_err']:
+            #     check[kk] = 1
+
+        pbar.set_postfix_str('Done')
 
     return H, Q
 

@@ -39,10 +39,13 @@ class BuildWDN:
 
         # Null Space
         self.closed_pipes = []
-        self.nulldata, self.auxdata = make_null_space(self.A12, self.nn, self.np, self.closed_pipes)
-        self.auxdata['max_iter'] = 50
-        self.auxdata['kappa'] = 1e7
-        self.auxdata['tol_err'] = 1e-6
+        try:
+            self.nulldata, self.auxdata = make_null_space(self.A12, self.nn, self.np, self.closed_pipes)
+            self.auxdata['max_iter'] = 50
+            self.auxdata['kappa'] = 1e7
+            self.auxdata['tol_err'] = 1e-6
+        except:
+            pass # look into this further
 
     def evaluate_hydraulics(self, print_timestep=True, **kwargs):
         # store temporarily the class attributes which are being replaced
@@ -147,13 +150,18 @@ class BuildWDN_fromMATLABfile(BuildWDN):
 
         # define reservoirs
         p = tmf['reservoirs'][0]
-        reservoirs = [
-            {
-                list(p[j][0].dtype.fields.keys())[i]: p[j][0][0][i][0] if isinstance(p[j][0][0][i][0], str) else
-                p[j][0][0][i][0][0] for i in range(len(list(p[j][0].dtype.fields.keys())))
-            }
-            for j in range(len(p))
-        ]
+        reservoirs = []
+        for j in range(len(p)):
+            tempdic = {}
+            for i in range(len(list(p[j][0].dtype.fields.keys()))):
+                tempdickey = list(p[j][0].dtype.fields.keys())[i]
+                if len(p[j][0][0][i]) == 0:
+                    tempdic[tempdickey] = ''
+                elif isinstance(p[j][0][0][i][0], str):
+                    tempdic[tempdickey] = p[j][0][0][i][0]
+                else:
+                    tempdic[tempdickey] = p[j][0][0][i][0][0]
+            reservoirs.append(tempdic)
 
         # headloss fucntions
         n_exp = tmf['n_exp']
