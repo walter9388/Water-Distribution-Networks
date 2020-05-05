@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import mplleaflet
 import osmnx as ox
 import folium
-
+import seaborn as sns
 
 class makenetworkgraph:
 
@@ -78,10 +78,42 @@ class makenetworkgraph:
         ox.nx.draw_networkx_nodes(self.G, pos, nodelist=self.H0_nodes, nodesize=10, node_color='r',ax=ax,label=label)
         return fig, ax
 
+    def plot_connected_points(self, closed_links=None, **kwargs):
+        fig = kwargs.get('fig', None)
+        ax = kwargs.get('ax', None)
+        label = kwargs.get('label', 'subgraph_')
+        if fig is None and ax is None:
+            fig, ax = plt.subplots(1, 1)
+        elif fig is None:
+            fig = plt.figure()
+        pos = ox.nx.get_node_attributes(self.G, 'pos')
+        H = self.remove_links_from_G(closed_links)
+        subgraphsets = list(ox.nx.weakly_connected_components(H))
+        # subgraphsets = list(ox.nx.connected_components(ox.nx.Graph(H)))
+        colours = self.get_colour_palette(len(subgraphsets))
+        for ii in range(len(subgraphsets)):
+            ox.nx.draw_networkx_nodes(H, pos, nodelist=list(subgraphsets[ii]), nodesize=4, ax=ax,
+                                       node_color=np.array([colours[ii]]), label=label+str(ii))
+        return fig, ax
 
-    def figshow_leaflet(self,fig):
+    def remove_links_from_G(self, closed_links):
+        if closed_links is not None:
+            H = self.G.__class__()
+            H.add_nodes_from(self.G)
+            H.add_edges_from(self.G.edges)
+            closed_links.sort(reverse=True)
+            for ii in closed_links:
+                H.remove_edge(*[np.where(self.A[ii, :].toarray() == 1)[1][0],
+                                np.where(self.A[ii, :].toarray() == -1)[1][0], 0])
+        else:
+            H = self.G
+        return H
+
+    def get_colour_palette(self, n):
+        return sns.color_palette("hls", n)
+
+    def figshow_leaflet(self, fig):
         mplleaflet.show(fig)
-
 
     def make_folium(self,**kwargs):
         # filename = kwargs.get('filename','folium_output_.html')

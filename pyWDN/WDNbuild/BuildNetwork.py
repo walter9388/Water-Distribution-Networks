@@ -221,8 +221,8 @@ class BuildWDN_fromMATLABfile(BuildWDN):
         self.nl = int(tmf['nl'][0][0])
 
         #PRVs/BVs/indexvalves
-        self.PRVs = list(tmf['PRVs'])
-        self.BVs = list(tmf['BVs'])
+        self.PRVs = (list(tmf['PRVs'][0]) if len(tmf['PRVs']) != 0 else [])
+        self.BVs = (list(tmf['BVs'][0]) if len(tmf['BVs']) != 0 else [])
         self.IndexValves = self.PRVs + self.BVs
 
         # add all remaining variables in tmf as attributes to the WDN class
