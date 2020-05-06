@@ -40,10 +40,7 @@ class BuildWDN:
         # Null Space
         self.closed_pipes = []
         try:
-            self.nulldata, self.auxdata = make_null_space(self.A12, self.nn, self.np, self.closed_pipes)
-            self.auxdata['max_iter'] = 50
-            self.auxdata['kappa'] = 1e7
-            self.auxdata['tol_err'] = 1e-6
+            self.remake_null_space()
         except:
             pass # look into this further
 
@@ -69,6 +66,11 @@ class BuildWDN:
         H0_nodes=[self.NodeIdMap[self.reservoirs[i]['Id']] for i in range(self.n0)]
         self.G = makenetworkgraph(x,y,A,H0_nodes=H0_nodes)
 
+    def remake_null_space(self):
+        self.nulldata, self.auxdata = make_null_space(self.A12, self.nn, self.np, self.closed_pipes)
+        self.auxdata['max_iter'] = 50
+        self.auxdata['kappa'] = 1e7
+        self.auxdata['tol_err'] = 1e-6
 
 
 class BuildWDN_fromMATLABfile(BuildWDN):
@@ -221,8 +223,8 @@ class BuildWDN_fromMATLABfile(BuildWDN):
         self.nl = int(tmf['nl'][0][0])
 
         #PRVs/BVs/indexvalves
-        self.PRVs = (list(tmf['PRVs'][0]) if len(tmf['PRVs']) != 0 else [])
-        self.BVs = (list(tmf['BVs'][0]) if len(tmf['BVs']) != 0 else [])
+        self.PRVs = (list(tmf['PRVs'][0]-1) if len(tmf['PRVs']) != 0 else [])
+        self.BVs = (list(tmf['BVs'][0]-1) if len(tmf['BVs']) != 0 else [])
         self.IndexValves = self.PRVs + self.BVs
 
         # add all remaining variables in tmf as attributes to the WDN class

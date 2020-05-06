@@ -50,10 +50,12 @@ def make_incidence_matrices(self):
     return A12, A10
 
 def make_null_space(A12,nn,npp,closed_pipes):
-    if closed_pipes != []:
-        A12[closed_pipes,:] = []
+    if len(closed_pipes) > 0:
+        CLmask = np.ones(npp, dtype=bool)
+        CLmask[closed_pipes] = False
+        A12 = A12[CLmask, :]
         npp = npp - len(closed_pipes)
-    nc=npp-nn
+    nc = npp-nn
 
     # # lu method
     # (P, L, U) = la.lu(A12.toarray())
@@ -67,13 +69,13 @@ def make_null_space(A12,nn,npp,closed_pipes):
 
     # Elhay null bases
     Pt, _, T = permute_cotree(A12)
-    L21 = -spla.spsolve(T[:nn,:nn].T,T[nn:npp,:nn].T).T
-    Z = Pt.T@sp.hstack([L21,sp.eye(nc)]).T
+    L21 = -spla.spsolve(T[:nn, :nn].T, T[nn:npp, :nn].T).T
+    Z = Pt.T@sp.hstack([L21, sp.eye(nc)]).T
 
     # cholseky
     factor=cholesky((A12.T@A12).tocsc())
-    P_L=sp.eye(nn)
-    Pr=sp.csc_matrix(P_L.toarray()[factor.P(), :])
+    P_L = sp.eye(nn)
+    Pr = sp.csc_matrix(P_L.toarray()[factor.P(), :])
     L_A12 = factor.L()
 
     nulldata={
@@ -98,12 +100,12 @@ def permute_cotree(A):
     Rt = sp.eye(m)
 
     for i in range(m):
-        K=A[i:,i:]
+        K = A[i:, i:]
         try:
             r=np.where(np.sum(abs(K), 1) == 1)[0][0]
         except:
-            r=np.array([],dtype=int)
-        c=np.where((abs(K[r,:]) == 1).toarray())[1]
+            r = np.array([], dtype=int)
+        c = np.where((abs(K[r, :]) == 1).toarray())[1]
 
         if r!=0: # don't do operations unless row permutations are needed
             P = sp.eye(n).tolil()

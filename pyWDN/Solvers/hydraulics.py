@@ -7,25 +7,59 @@ from datetime import timedelta as td
 from tqdm import tqdm
 
 
-def get_scaled_demand(demand, flow_in, flow_dt, flow_out=None):
+def get_scaled_demand(demand, flows, flow_dt, flow_dict, wdn, plot_demand_bins=False):
     """
     :param demand: 2D-numpy-array of dimensions nn x nl
-    :param flow_in: 2D-numpy-array of dimensions n_flows_in x nl
+    :param flows: 2D-numpy-array of dimensions n_flows x nl
     :param flow_dt: list of datetimes corresponding to n_flows (currently 15 min timesteps only)
-    :param flow_out: OPTIONAL: None if no measured out flow avaliable, else a list of dictionaries which the outflow
-    node ID (so the demand at that point can be adjusted to mimic flow out) and a 1D-numpy-array of dimension nl,
-    e.g. flow_out = [dict(index=7, data=np.array([1,2,3,4]))]
+    :param flow_dict: list of dictionaries of length n_flows. Each dictionary corresponds to that row in "flows" and
+    must contain: 1. The type of flow (i.e. flow in or flow out) - key='in_out', value='in' or 'out';
+                  2. The node/link index the flow corresponds to - key='index', value=int;
+                  3. Whether the flow is to be associated with a node or link (this is important because nodal flows
+                  will have a demand added at there location if out, and links will be closed for sectorisation) -
+                  key='node_link', value='node' or 'link'
+    flow_dict example: [dict(in_out='in', index=7, node_link='node')]
+    plot_demand_bins: boolean, shows a plot of how the different demand zones have been allocated
     :return: new_demands: same dimensions as old demands
     """
 
-    if (len(flow_dt) != len(flow_in)):
+    if len(flow_dt) != flows.shape[1]:
         raise ValueError('flow and datetime should be the same length')
 
-    # determine the total amount of water used at each time step (i.e. flow_in - flow_out)
-    if flow_out is not None:
-        total_dem = flow_in.sum(axis=1) - np.vstack([flow_out[ii]['data'] for ii in range(len(flow_out))]).sum(axis=0)
+    # split nodes into different demand bins (via connected_components in networkx)
+    if not hasattr(wdn, 'G'):
+        wdn.make_network_graph()
+    flowlinks = [(flow_dict[i]['index'], i) for i in range(len(flow_dict)) if flow_dict[i]['node_link'] == 'link']
+    flowlinks_ = []
+    if (len(flowlinks) > 0) | (len(wdn.closed_pipes) > 0):
+        flowlinks_ = list(list(zip(*flowlinks))[0])
+        flowlinks__ = list(list(zip(*flowlinks))[1])
+        H = wdn.G.remove_links_from_G(wdn.closed_pipes + flowlinks_)
+        H_sg = wdn.G.get_subgraphs(H)
+        H_sg = np.array([(j, i) for j in range(len(H_sg)) for i in list(H_sg[j])])
+        bins = H_sg[np.argsort(H_sg[:, 1]), 0]  # 1D-numpy array
     else:
-        total_dem = flow_in.sum(axis=1)
+        bins = np.zeros((demand.shape[0] + wdn.n0,), dtype=int)  # 1D-numpy array
+
+    # determine flow links associated nodes and thus index for bins
+    links2nodes = []
+    for ii in range(len(flowlinks)):
+        # inlet of link / start node => flow out of that area
+        links2nodes.append(dict(in_out='out', idx=flowlinks__[ii],
+                                index=np.where(wdn.A12[flowlinks_[ii], :].toarray() == -1)[1][0]))
+        # outlet of link / end node => flow in to that area
+        links2nodes.append(dict(in_out='in', idx=flowlinks__[ii],
+                                index=np.where(wdn.A12[flowlinks_[ii], :].toarray() == 1)[1][0]))
+
+    # remove links from flow_dict
+    for ii in range(len(flow_dict)-1, -1, -1):
+        flow_dict[ii]['idx'] = ii
+        if flow_dict[ii]['node_link'] == 'link':
+            flow_dict.pop(ii)
+
+    # combine dictionaries and update flow matrix
+    flow_dict += links2nodes
+    flows = flows[np.array([i['idx'] for i in flow_dict]), :]
 
     # create multiplier array aligned with datetime for slicing (written cumbersomely, can be updated in the future)
     int_secs = (60*60*24)/demand.shape[1]
@@ -34,18 +68,39 @@ def get_scaled_demand(demand, flow_in, flow_dt, flow_out=None):
     flow_dt = [(flow_dt[i].hour, flow_dt[i].minute) for i in range(len(flow_dt))]
 
     # get the index of which column in the demand series should be reallocated as a comparison of the datetime arrays
-    demand_ts = [np.where((flow_dt[i] == np.array(mult_dt)).all(axis=1))[0][0] for i in range(len(flow_dt))]
+    demand_ts = np.array([np.where((flow_dt[i] == np.array(mult_dt)).all(axis=1))[0][0] for i in range(len(flow_dt))])
 
-    # create new rescaled demands based on the total demand data
-    demand_sum = demand.sum(axis=0)
+    # prepare empty array for new demands
     new_demands = np.zeros((demand.shape[0], len(flow_dt)))
-    for i in range(len(flow_dt)):
-        new_demands[:, i] = demand[:, demand_ts[i]]*total_dem[i]/demand_sum[demand_ts[i]]
 
-    # add any flows out as demands, thus addressing the mass balance
-    if flow_out is not None:
-        for ii in range(len(flow_out)):
-            new_demands[flow_out[ii]['index'], :] += flow_out[ii]['data']
+    # do updates for each bin
+    flow_bins = np.array([bins[i['index']] for i in flow_dict])
+    flow_in_out = np.array([i['in_out'] == 'in' for i in flow_dict])
+    bins = bins[:demand.shape[0]]  # remove H0 nodes
+    for kk in range(np.max(bins) + 1):
+
+        # determine the total amount of water used at each time step (i.e. flow_in - flow_out)
+        flow_in = np.sum(flows[(flow_bins == kk) & (flow_in_out), :], axis=0)
+        flow_out = np.sum(flows[(flow_bins == kk) & (~flow_in_out), :], axis=0)
+        total_measured_dem = flow_in - flow_out
+
+        # sum up existing demand
+        demand_sum = np.sum(demand[bins == kk, :], axis=0)
+
+        # create new rescaled demands based on the total demand data
+        new_demands[bins == kk, :] = demand[np.ix_(bins == kk, demand_ts)] * total_measured_dem / demand_sum[demand_ts]
+
+        # add any flows out as demands, thus addressing the mass balance
+        if np.sum(flow_out) != 0:
+            for ii in range(flows.shape[0] - len(links2nodes)):  # only add demands at flow nodes, not at flow links
+                if (flow_bins[ii] == kk) & (~flow_in_out[ii]):
+                    new_demands[flow_dict[ii]['index'], :] += flows[ii, :]
+
+    if plot_demand_bins:
+        fig, ax = wdn.G.plot_network()
+        wdn.G.plot_connected_points(closed_links=wdn.closed_pipes + flowlinks_, fig=fig, ax=ax)
+        ax.legend()
+        fig.show()
 
     return new_demands
 
@@ -64,14 +119,14 @@ def update_eta_manually(PRVs, inlet_pressure, outlet_pressure, flow, A12, A10, e
     elif np.any(np.isnan(inlet_pressure)) | np.any(np.isnan(outlet_pressure)) | np.any(np.isnan(flow)):
         raise ValueError('There cannot be any nan values in the pressure or flow arrays')
 
-    nl = len(D)
-    p_data = np.empty((A12.shape[1], nl)) * np.nan
-    q_data = np.empty((A12.shape[0], nl)) * np.nan
+    nl = inlet_pressure.shape[1]
+    p_data = np.full((A12.shape[1], nl), np.nan)
+    q_data = np.full((A12.shape[0], nl), np.nan)
 
     # add data into the blank arrays
     for ii in range(len(PRVs)):
-        p_data[np.where(A12[1, :].toarray() == 1)[1][0], :] = inlet_pressure[ii, :]
-        p_data[np.where(A12[1, :].toarray() == -1)[1][0], :] = outlet_pressure[ii, :]
+        p_data[np.where(A12[PRVs[ii], :].toarray() == -1)[1][0], :] = inlet_pressure[ii, :]
+        p_data[np.where(A12[PRVs[ii], :].toarray() == 1)[1][0], :] = outlet_pressure[ii, :]
         q_data[PRVs[ii], :] = flow[ii, :]
 
     eta, A13 = update_eta(PRVs, p_data, q_data, A12, A10, elev, nl, H0, D, C, L, headloss, IndexValves, [], [])
@@ -103,13 +158,14 @@ def update_eta(PRVs, p_data, q_data, A12, A10, elev, nl, H0, D, C, L, headloss, 
             cc, ResCoeff_LAMIflow, K = DW_constants(Viscos, pL, pD)
 
             ResCoeff = np.zeros((len(PRVs), 1))
-            G = np.zeros((len(PRVs), 1))
+            G = np.zeros((len(PRVs), nl))
             Fdiag = np.ones((len(PRVs), 1))
 
             alpha, beta = DW_cubic_spline(pR, pD)  # cubic interpolating spline
 
-            G, _ = DW_flow(pD, pR, Viscos, cc, q_data[PRVs, :], alpha, beta, ResCoeff_LAMIflow, K, G, Fdiag)
-
+            for ii in range(nl):
+                G[:, ii], _ = DW_flow(pD, pR, Viscos, cc, q_data[[PRVs], [ii]], alpha, beta, ResCoeff_LAMIflow, K,
+                                      G[:, [ii]], Fdiag)
             eta = -(A12[PRVs, :] @ (p_data + elev[:, np.newaxis] @ np.ones((1, nl)))
                     + A10[PRVs, :] @ H0 + G * q_data[PRVs, :])
         else:
@@ -124,8 +180,8 @@ def evaluate_hydraulic(A12, A10, C, D, demands, H0, IndexValves, L, nn, NP, nl, 
     if H0.shape[0] == 0:
         raise AttributeError('There are no "H0" nodes in the network, therefore the hydraulics cannot be evaluated')
 
-    H = np.empty((nn, nl)) * np.nan
-    Q = np.empty((NP, nl)) * np.nan
+    H = np.full((nn, nl), np.nan)
+    Q = np.full((NP, nl), np.nan)
     err = np.zeros(nl)
     iter = np.zeros(nl)
     CONDS = np.zeros(nl)
@@ -142,7 +198,7 @@ def evaluate_hydraulic(A12, A10, C, D, demands, H0, IndexValves, L, nn, NP, nl, 
             pbar.set_description(f'Timestep {kk}')
             xtemp = spla.spsolve(nulldata['L_A12'], nulldata['Pr'] @ demands[:, kk])
             w = nulldata['Pr'].T @ spla.spsolve(nulldata['L_A12'].T, xtemp)
-            xtemp = A12 @ w
+            xtemp = nulldata['A12'] @ w
             nulldata['x'] = xtemp
             q_0 = 0.3 * np.ones((NP, 1))
             h_0 = 130 * np.ones((nn, 1))
@@ -155,14 +211,13 @@ def evaluate_hydraulic(A12, A10, C, D, demands, H0, IndexValves, L, nn, NP, nl, 
                 auxdata['L'] = L[:, np.newaxis]
                 auxdata['ResCoeff'] = np.zeros((NP, 1))
             Q[:, kk], H[:, kk], err_, iter_, CONDS[kk], check[kk] = solve_Nullspace(A12, A12.T, A10, A13,
-                                                                                          H0[:, [kk]], Eta[:, kk],
+                                                                                          H0[:, [kk]], Eta[:, [kk]],
                                                                                           headloss['n_exp'], q_0, h_0,
-                                                                                          demands[:, kk], NP,
+                                                                                          demands[:, [kk]], NP,
                                                                                           nulldata, auxdata,
                                                                                           headloss['formula'])
-            err[kk], iter[kk] = err_, iter_
 
-            pbar.set_postfix({'Error': err_, 'Iteration': iter_})
+            pbar.set_postfix({'Error': err[kk], 'Iteration': iter[kk]})
             # if print_timestep:
             #     print('Time Step: %i' % (kk + 1))
             # if ERRORS > auxdata['tol_err']:
@@ -235,7 +290,7 @@ def solve_Nullspace(A12, A21, A10, A13, h0, eta, n_exp, qk, hk, d, NP, nulldata,
 
     # calculate initial error
     err1 = np.linalg.norm(
-        np.vstack((G * qk + A12 @ hk + A10 @ h0 + A13 @ eta, A21 @ qk - d[:, np.newaxis])), ord=np.inf)
+        np.vstack((G * qk + A12 @ hk + A10 @ h0 + A13 @ eta, A21 @ qk - d)), ord=np.inf)
 
     nc = Z.shape[1]
 
@@ -282,8 +337,7 @@ def solve_Nullspace(A12, A21, A10, A13, h0, eta, n_exp, qk, hk, d, NP, nulldata,
                 eta = -A12[valves, :] @ h_ideal - A10[valves, :] @ h0 - G[valves] * q[valves]
 
         err1 = np.linalg.norm(np.vstack(
-            (G * q + A12 @ h[:, np.newaxis] + A10 @ h0 + A13 @ eta, A21 @ q - d[:, np.newaxis])),
-                              ord=np.inf)
+            (G * q + A12 @ h[:, np.newaxis] + A10 @ h0 + A13 @ eta, A21 @ q - d)),ord=np.inf)
 
         ERRORS = err1
 
@@ -324,8 +378,7 @@ def DW_flow(pD,pR,Viscos,cc,q,alpha,beta,ResCoeff_LAMIflow,K,G,Fdiag):
     G[TRANflow, 0] = (f * (8 / (np.pi ** 2 * 9.81))) * K[TRANflow, 0] * np.abs(
         q[TRANflow, 0])  # .^ (n_exp[TRANflow] - 1);
     G[TURBflow, 0] = (1 / (np.log(theta[TURBflow, 0]) ** 2)) * ((2 * np.log(10) ** 2) / (np.pi ** 2 * 9.81)) * K[
-        TURBflow, 0] * np.abs(
-        q[TURBflow, 0])  # .^ (n_exp(TURBflow) - 1);
+        TURBflow, 0] * np.abs(q[TURBflow, 0])  # .^ (n_exp(TURBflow) - 1);
 
     Fdiag[LAMIflow] = G[LAMIflow]
     Fdiag[TRANflow, 0] = (ff * (8 / (np.pi ** 2 * 9.81))) * K[TRANflow, 0] * np.abs(q[TRANflow, 0])

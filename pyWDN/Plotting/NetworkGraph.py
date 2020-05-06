@@ -66,7 +66,34 @@ class makenetworkgraph:
         ox.nx.draw(self.G, pos, node_size=node_size, arrows=False, node_color=node_color,ax=ax,label=label)
         return fig, ax
 
-    def plot_reservoirs(self,**kwargs):
+    def plot_nodal_z_vector(self, vec, cbar_label, **kwargs):
+        fig = kwargs.get('fig', None)
+        ax = kwargs.get('ax', None)
+        if fig is None and ax is None:
+            fig, ax = plt.subplots(1, 1)
+        elif fig is None:
+            fig = plt.figure()
+        pos = ox.nx.get_node_attributes(self.G, 'pos')
+        if len(pos) != len(vec):
+            raise ValueError('vector in needs to be length nn + n0')
+
+        cmap = plt.cm.jet
+        vmin = min(vec)
+        vmax = max(vec)
+
+        nodes = ox.nx.draw_networkx_nodes(self.G, pos, nodesize=2, node_color=vec, node_cmap=cmap, ax=ax, vmin=vmin, vmax=vmax)
+
+        # bug (apparently will be fixed in networkx 2.5) where cmap doesn't update:
+        nodes.cmap = cmap
+        nodes.set_clim(vmin, vmax)
+
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax))
+        sm._A = []
+        cbar = fig.colorbar(sm)
+        cbar.set_label(cbar_label)
+        return fig, ax
+
+    def plot_reservoirs(self, **kwargs):
         fig = kwargs.get('fig', None)
         ax = kwargs.get('ax', None)
         label = kwargs.get('label', 'H0')
@@ -88,13 +115,16 @@ class makenetworkgraph:
             fig = plt.figure()
         pos = ox.nx.get_node_attributes(self.G, 'pos')
         H = self.remove_links_from_G(closed_links)
-        subgraphsets = list(ox.nx.weakly_connected_components(H))
-        # subgraphsets = list(ox.nx.connected_components(ox.nx.Graph(H)))
+        subgraphsets = self.get_subgraphs(H)
         colours = self.get_colour_palette(len(subgraphsets))
         for ii in range(len(subgraphsets)):
-            ox.nx.draw_networkx_nodes(H, pos, nodelist=list(subgraphsets[ii]), nodesize=4, ax=ax,
+            ox.nx.draw_networkx_nodes(H, pos, nodelist=list(subgraphsets[ii]), nodesize=2, ax=ax,
                                        node_color=np.array([colours[ii]]), label=label+str(ii))
         return fig, ax
+
+    def get_subgraphs(self, digraph):
+        # list(ox.nx.connected_components(ox.nx.Graph(digraph)))  # alternative
+        return list(ox.nx.weakly_connected_components(digraph))
 
     def remove_links_from_G(self, closed_links):
         if closed_links is not None:
@@ -102,9 +132,16 @@ class makenetworkgraph:
             H.add_nodes_from(self.G)
             H.add_edges_from(self.G.edges)
             closed_links.sort(reverse=True)
+            print(closed_links)
+            get_node = lambda idx, i: np.where(self.A[idx, :].toarray() == i)[1][0]
             for ii in closed_links:
-                H.remove_edge(*[np.where(self.A[ii, :].toarray() == 1)[1][0],
-                                np.where(self.A[ii, :].toarray() == -1)[1][0], 0])
+                print(ii)
+                try:
+                    H.remove_edge(*[get_node(ii, 1), get_node(ii, -1), 0])
+                except ox.nx.exception.NetworkXError:
+                    H.remove_edge(*[get_node(ii, -1), get_node(ii, 1), 0])
+                else:
+                    raise ValueError(f'no edge between {get_node(ii, 1)}-{get_node(ii, -1)}')
         else:
             H = self.G
         return H
