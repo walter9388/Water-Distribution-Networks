@@ -131,17 +131,16 @@ class makenetworkgraph:
             H = self.G.__class__()
             H.add_nodes_from(self.G)
             H.add_edges_from(self.G.edges)
+            closed_links = list(set(closed_links))  # remove duplicates
             closed_links.sort(reverse=True)
-            print(closed_links)
             get_node = lambda idx, i: np.where(self.A[idx, :].toarray() == i)[1][0]
             for ii in closed_links:
-                print(ii)
-                try:
-                    H.remove_edge(*[get_node(ii, 1), get_node(ii, -1), 0])
-                except ox.nx.exception.NetworkXError:
-                    H.remove_edge(*[get_node(ii, -1), get_node(ii, 1), 0])
-                else:
-                    raise ValueError(f'no edge between {get_node(ii, 1)}-{get_node(ii, -1)}')
+                # try:
+                H.remove_edge(*[get_node(ii, 1), get_node(ii, -1), 0])
+                # except ox.nx.exception.NetworkXError:
+                #     H.remove_edge(*[get_node(ii, -1), get_node(ii, 1), 0])
+                # else:
+                #     raise ValueError(f'no edge between {get_node(ii, 1)}-{get_node(ii, -1)}')
         else:
             H = self.G
         return H
